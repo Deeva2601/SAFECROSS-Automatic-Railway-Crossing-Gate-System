@@ -1,0 +1,61 @@
+// =============================================================
+// 🟢 SENDER CODE — Piezo Sensor (ESP32)
+// Sends message "TRAIN" to Receiver when vibration detected
+// =============================================================
+
+#include <WiFi.h>
+#include <esp_now.h>
+
+const int piezoPin = 34;     // Piezo sensor analog input
+const int ledPin = 2;        // Onboard LED
+int threshold = 150;         // Adjust based on sensor sensitivity
+unsigned long lastSend = 0;  // For message delay
+
+// 🔹 Receiver MAC Address (replace this with your receiver's MAC)
+uint8_t receiverAddress[] = {0x14, 0x08, 0x08, 0xA6, 0x2C, 0xB4};
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(piezoPin, INPUT);
+  pinMode(ledPin, OUTPUT);
+
+  WiFi.mode(WIFI_STA);
+  Serial.print("Sender MAC: ");
+  Serial.println(WiFi.macAddress());
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("❌ ESP-NOW init failed!");
+    while (true);
+  }
+
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, receiverAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("❌ Failed to add peer");
+    return;
+  }
+
+  Serial.println("✅ Sender Ready...");
+}
+
+void loop() {
+  int sensorValue = analogRead(piezoPin);
+  Serial.print("Piezo Value: ");
+  Serial.println(sensorValue);
+
+  if (sensorValue > threshold && millis() - lastSend > 3000) {
+    digitalWrite(ledPin, HIGH);
+    const char *message = "TRAIN";
+    esp_now_send(receiverAddress, (uint8_t *)message, strlen(message));
+    Serial.println("🚂 Train detected! Message sent.");
+    lastSend = millis();
+    delay(5000);
+  } else {+
+    digitalWrite(ledPin, LOW);
+  }
+
+  delay(200);
+}

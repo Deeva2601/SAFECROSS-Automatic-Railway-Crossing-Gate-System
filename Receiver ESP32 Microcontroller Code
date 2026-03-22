@@ -1,0 +1,99 @@
+// =============================================================
+// 🔵 RECEIVER CODE — Servo Motor + IR Sensor (ESP32)
+// Receives "TRAIN" signal, closes gate, and reopens after IR clears
+// =============================================================
+
+#include <WiFi.h>
+#include <esp_now.h>
+#include <ESP32Servo.h>
+
+Servo gateServo;
+
+// === Pins ===
+int servoPin = 18;
+int irSensorPin = 4;
+int ledPin = 2;
+int buzzerPin = 5;
+
+// === Flags / States ===
+bool trainDetected = false;
+bool gateClosed = false;
+bool irTriggered = false; // true jab IR ne LOW detect kiya ho
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+
+  pinMode(irSensorPin, INPUT);
+  pinMode(ledPin, OUTPUT);
+  pinMode(buzzerPin, OUTPUT);
+
+  gateServo.attach(servoPin);
+  gateServo.write(0); // Gate open initially
+
+  digitalWrite(ledPin, LOW);
+  digitalWrite(buzzerPin, LOW);
+
+  // Initialize ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("❌ ESP-NOW init failed!");
+    return;
+  }
+
+  esp_now_register_recv_cb(onDataRecv);
+
+  Serial.println("✅ Receiver Ready — Waiting for TRAIN signal...");
+}
+
+void loop() {
+  int irState = digitalRead(irSensorPin);
+
+  // --- Train approaching but not yet at IR ---
+  if (trainDetected && !irTriggered && irState == LOW) {
+    Serial.println("🚆 Train reached IR sensor — turning off buzzer and LED");
+    digitalWrite(ledPin, LOW);
+    digitalWrite(buzzerPin, LOW);
+    irTriggered = true;  // mark that IR has been triggered once
+  }
+
+  // --- Train has passed IR completely ---
+  if (trainDetected && irTriggered && irState == HIGH) {
+    Serial.println("✅ Train passed gate — opening gate...");
+    gateServo.write(0);         // open gate
+    delay(1000);
+    digitalWrite(ledPin, LOW);
+    digitalWrite(buzzerPin, LOW);
+    gateClosed = false;
+    trainDetected = false;
+    irTriggered = false;
+  }
+
+  delay(200);
+}
+
+// ================== ESP-NOW Receive Callback ==================
+void onDataRecv(const esp_now_recv_info *info, const uint8_t *incomingData, int len) {
+  char msg[50];
+  memcpy(msg, incomingData, len);
+  msg[len] = '\0';
+
+  Serial.print("📩 Received Message: ");
+  Serial.println(msg);
+
+  if (strcmp(msg, "TRAIN") == 0 && !gateClosed) {
+    Serial.println("🚨 Train detected by Piezo — closing gate...");
+    
+    trainDetected = true;
+    gateClosed = true;
+
+    // Close gate slowly and turn ON alerts
+    for (int pos = 0; pos <= 90; pos += 5) {
+      gateServo.write(pos);
+      delay(30);
+    }
+
+    digitalWrite(ledPin, HIGH);
+    digitalWrite(buzzerPin, HIGH);
+    Serial.println("🚧 Gate closed, LED and buzzer ON.");
+  }
+}
